@@ -1,0 +1,102 @@
+version: "3"
+
+services:
+  traefik:
+    image: traefik:v2
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--tracing.elastic.apmServerUrl=http://elasticsearch:7200"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+
+  apm-server:
+    container_name: apm-server-container
+    image: store/elastic/apm-server:7.4.2
+    user: apm-server
+    ports:
+      - "0.0.0.0:7200:7200"
+    depends_on: ["elasticsearch", "kibana"]
+    command: /usr/share/apm-server/apm-server -e -c /usr/share/apm-server/apm-server.yml -E output.elasticsearch.hosts=elasticsearch:9200 -E setup.kibana.hosts=kibana:5601 -E apm-server.host=apm-server:7200 --strict.perms=false
+    networks: 
+      - lab-network
+    healthcheck:
+      test: ["CMD", "curl", "-s", "-f", "http://localhost:7200/polls"]
+      retries: 6
+  
+  elasticsearch:
+    container_name: elasticsearch-container
+    image: docker.io/elasticsearch:7.4.2
+    environment:
+            discovery.type: single-node
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    healthcheck:
+      test: ["CMD", "curl","-s" ,"-f", "http://localhost:9200/_cat/health"]
+    networks:
+      - lab-network
+
+  kibana:
+    container_name: kibana-container
+    hostname: kibana
+    image: docker.io/kibana:7.4.2
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    ports: ['5601:5601']
+    # depends_on: ["elasticsearch"]
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "curl", "-s", "-f", "http://localhost:5601/"]
+      retries: 6
+    networks:
+      - lab-network
+
+  grafana:
+    container_name: grafana-container
+    hostname: grafana
+    image: grafana/grafana:6.4.3
+    user: root
+    #volumes:
+    #  - grafanadata:/var/lib/grafana
+    environment:
+      GF_SERVER_ROOT_URL: http://grafana:3000
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: secret
+      
+    ports: ['3000:3000']
+    depends_on: ["elasticsearch"]
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "curl", "-s", "-f", "http://localhost:3000/"]
+      retries: 6
+    networks:
+      - lab-network
+
+  whoami:
+    image: containous/whoami
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.whoami.rule=Host(`whoami.localhost`)"
+      - "traefik.http.routers.whoami.entrypoints=web"
+          
+volumes:
+  esdata:
+    driver: local
+  grafanadata:
+    driver: local
+
+networks: 
+  lab-network:
+
